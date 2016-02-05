@@ -30,7 +30,7 @@ end
 
 module QuiverImport
   class Import
-    attr_accessor :blocks, :codeblock, :mdblock
+    attr_accessor :blocks, :codeblock, :mdblock, :inside_code
     attr_reader   :input_file, :output_dir, :title
 
     def initialize(input_file, output_dir)
@@ -40,6 +40,7 @@ module QuiverImport
       @input_file   = input_file
       @output_dir   = output_dir
       @title, @tags = Import.parse_title_and_tags(input_file)
+      @inside_code  = false
     end
 
     def self.parse_title_and_tags(input_file)
@@ -52,32 +53,60 @@ module QuiverImport
       ]
     end
 
-    def run(strip_toc = true, reduce_headers = true)
-      inside_code = false
+    def process_code_boundary(boundary_match)
+      add_and_reset_blocks
+      @inside_code = !boundary_match[:language].nil?
+      @codeblock.language = boundary_match[:language] if inside_code
+    end
 
+    def process_code_line(line)
+      @codeblock.data = @codeblock.data + line
+    end
+
+    def process_md_line(line, strip_toc, reduce_headers)
+      return if strip_toc && line =~ /\[TOC\]/                  # Ignore TOC
+      line = line[1..-1] if reduce_headers and line =~ /\#{2,}/ # Remove one level from every header
+      if line =~ /!\[(?<alt_text>.*)\]\((?<src>\S+)( "(?<title>.*)")?\)/
+        line = process_img_line(line)
+      end
+      @mdblock.data = @mdblock.data + line
+    end
+
+    # TODO: cache images and don't recopy them if they already exist in the destination
+    def process_img_line(line)
+      img_match = line.scan(/!\[(?<alt_text>.*)\]\((?<src>\S+)( "(?<title>.*)")?\)/)
+      img_match.each do |alt_text, src, title|
+        src_file = File.expand_path(src, File.dirname(@input_file))
+        raise "Couldn't find image at: #{src_file}" if !File.exist?(src_file)
+        dest = img_to_resources(src_file)
+        line.sub!(src, dest)
+      end
+      line
+    end
+
+    def img_to_resources(src)
+      system 'mkdir', '-p', "#{@output_dir}/resources"
+      src_extension = File.extname(src)
+      dest_filename = "#{SecureRandom.uuid.upcase}#{src_extension}"
+      system 'cp', "#{src}", "#{@output_dir}/resources/#{dest_filename}"
+      "quiver-image-url/#{dest_filename}"
+    end
+
+    def run(strip_toc = true, reduce_headers = true)
       File.foreach(@input_file).drop(2).each do |line|
         if (code_boundary = line.match(/```(?<language>\S+)?/))
-          add_and_reset_blocks
-          if code_boundary[:language]
-            inside_code = true
-            @codeblock.language = code_boundary[:language]
-          else
-            inside_code = false
-          end
+          process_code_boundary(code_boundary)
+        elsif @inside_code
+          process_code_line(line)
         else
-          if inside_code
-            @codeblock.data = @codeblock.data + line
-          else
-            next if strip_toc && line =~ /\[TOC\]/
-            line = line[1..-1] if reduce_headers and line =~ /\#{2,}/
-            @mdblock.data = @mdblock.data + line
-          end
+          process_md_line(line, strip_toc, reduce_headers)
         end
       end
 
       add_and_reset_blocks
       clean_blocks
 
+      system 'mkdir', '-p', "#{@output_dir}"
       IO.write("#{@output_dir}/content.json", content_json)
       IO.write("#{@output_dir}/meta.json", meta_json)
     end
@@ -103,19 +132,19 @@ module QuiverImport
 
   def content_json(*a)
     {
-      'title': (@title || @input_file),
-      'cells': @blocks
+      title: (@title || @input_file),
+      cells: @blocks
     }.to_json(*a)
   end
 
   def meta_json
     now = Time.now.utc.to_i
     {
-      'created_at': now,
-      'tags': @tags,
-      'title': @title,
-      'updated_at': now,
-      'uuid': SecureRandom.uuid
+      created_at: now,
+      tags: @tags,
+      title: @title,
+      updated_at: now,
+      uuid: SecureRandom.uuid.upcase
     }.to_json
   end
 end
