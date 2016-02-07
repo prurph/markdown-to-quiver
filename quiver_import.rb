@@ -1,7 +1,13 @@
-require 'pry'
 require 'json'
 require 'securerandom'
 
+# USAGE: ruby quiver_import.rb /folder/containing/md/files/ /export/location.qvnotebook 'Notebook Name'
+# - Takes all the .md files in the first argument and puts them in a directory
+#   in the second argument (add .qvnotebook to the name for easy importing)
+# - Each .md file will be a separate note
+# - Images are allowed provided the paths specified are relative to the .md file
+#   that references them. TODO: support URL images by just passing the markdown
+#   through.
 
 class CodeBlock
   attr_accessor :language, :data
@@ -30,6 +36,10 @@ end
 
 module QuiverImport
   class Import
+    @@LANG_MAP = {
+      'bash' => 'sh'
+    }
+
     attr_accessor :blocks, :codeblock, :mdblock, :inside_code
     attr_reader   :input_file, :output_dir, :title
 
@@ -56,7 +66,10 @@ module QuiverImport
     def process_code_boundary(boundary_match)
       add_and_reset_blocks
       @inside_code = !boundary_match[:language].nil?
-      @codeblock.language = boundary_match[:language] if inside_code
+      if inside_code
+        @codeblock.language =
+          @@LANG_MAP[boundary_match[:language]] || boundary_match[:language]
+      end
     end
 
     def process_code_line(line)
@@ -150,7 +163,16 @@ module QuiverImport
 end
 
 include QuiverImport
-input_file = ARGV[0]
-output_dir = ARGV[1]
+input_dir, output_dir, notebook_name = ARGV
 
-Import.new(input_file, output_dir).run
+Dir.glob("#{input_dir}/*.md").each do |note|
+  note_output_dir = "#{output_dir}/#{SecureRandom.uuid.upcase}.qvnote"
+  Import.new(note, note_output_dir).run
+end
+
+notebook_json = {
+  name: "#{notebook_name}",
+  uuid: SecureRandom.uuid.upcase
+}.to_json
+
+IO.write("#{output_dir}/meta.json", notebook_json)
