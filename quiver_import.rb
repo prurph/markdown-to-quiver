@@ -1,5 +1,6 @@
 require 'json'
 require 'securerandom'
+require 'uri'
 
 # USAGE: ruby quiver_import.rb /folder/containing/md/files/ /export/location.qvnotebook 'Notebook Name'
 # - Takes all the .md files in the first argument and puts them in a directory
@@ -88,12 +89,17 @@ module QuiverImport
     # TODO: cache images and don't recopy them if they already exist in the destination
     def process_img_line(line)
       img_match = line.scan(/!\[(?<alt_text>.*)\]\((?<src>\S+)( "(?<title>.*)")?\)/)
-      img_match.each do |alt_text, src, title|
-        src_file = File.expand_path(src, File.dirname(@input_file))
-        raise "Couldn't find image at: #{src_file}" if !File.exist?(src_file)
-        dest = img_to_resources(src_file)
-        line.sub!(src, dest)
-      end
+
+      # Pass http/https directly through (don't bother downloading them)
+      # For local files, copy them to /resources and link with quiver-image-url
+      img_match
+        .reject {|alt_text, src, title| URI::regexp(['http', 'https']) =~ src}
+        .each do |alt_text, src, title|
+          src_file = File.expand_path(src, File.dirname(@input_file))
+          raise "Couldn't find image at: #{src_file}" unless File.exist?(src_file)
+          dest = img_to_resources(src_file)
+          line.sub!(src, dest)
+        end
       line
     end
 
