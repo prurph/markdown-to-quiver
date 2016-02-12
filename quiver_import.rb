@@ -77,9 +77,7 @@ module QuiverImport
       @codeblock.data = @codeblock.data + line
     end
 
-    def process_md_line(line, strip_toc, reduce_headers)
-      return if strip_toc && line =~ /\[TOC\]/                  # Ignore TOC
-      line = line[1..-1] if reduce_headers and line =~ /\#{2,}/ # Remove one level from every header
+    def process_md_line(line)
       if line =~ /!\[(?<alt_text>.*)\]\((?<src>\S+)( "(?<title>.*)")?\)/
         line = process_img_line(line)
       end
@@ -111,14 +109,14 @@ module QuiverImport
       "quiver-image-url/#{dest_filename}"
     end
 
-    def run(strip_toc = true, reduce_headers = true)
+    def run
       File.foreach(@input_file).drop(2).each do |line|
         if (code_boundary = line.match(/```(?<language>\S+)?/))
           process_code_boundary(code_boundary)
         elsif @inside_code
           process_code_line(line)
         else
-          process_md_line(line, strip_toc, reduce_headers)
+          process_md_line(line)
         end
       end
 
