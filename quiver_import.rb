@@ -42,16 +42,16 @@ module QuiverImport
     }
 
     attr_accessor :blocks, :codeblock, :mdblock, :inside_code
-    attr_reader   :input_file, :output_dir, :title
+    attr_reader   :input_file, :output_dir, :title, :tags, :has_title_and_tags
 
     def initialize(input_file, output_dir)
-      @blocks       = []
-      @codeblock    = CodeBlock.new('')
-      @mdblock      = MarkdownBlock.new('')
-      @input_file   = input_file
-      @output_dir   = output_dir
-      @title, @tags = Import.parse_title_and_tags(input_file)
-      @inside_code  = false
+      @blocks         = []
+      @codeblock      = CodeBlock.new('')
+      @mdblock        = MarkdownBlock.new('')
+      @input_file     = input_file
+      @output_dir     = output_dir
+      @inside_code    = false
+      @title, @tags, @has_title_and_tags = Import.parse_title_and_tags(input_file)
     end
 
     def self.parse_title_and_tags(input_file)
@@ -59,8 +59,9 @@ module QuiverImport
       title_match = header[0].match(/#\s*(.+)/)
       tag_match   = header[1].match(/(?<=\[)(.+)(?=\])/)
       [
-        title_match.nil? ? input_file : title_match[1],
-        tag_match.nil?   ? [] : tag_match[1].split(/[\s,\|]/).reject(&:empty?)
+        title_match ? title_match[1] : input_file,
+        tag_match   ? tag_match[1].split(/[\s,\|]/).reject(&:empty?) : [],
+        !title_match.nil? || !tag_match.nil?
       ]
     end
 
@@ -109,8 +110,9 @@ module QuiverImport
       "quiver-image-url/#{dest_filename}"
     end
 
-    def run
-      File.foreach(@input_file).drop(2).each do |line|
+    def run(title_and_tags = false)
+      iter = @has_title_and_tags ? File.foreach(@input_file).drop(2) : File.foreach(@input_file)
+      iter.each do |line|
         if (code_boundary = line.match(/```(?<language>\S+)?/))
           process_code_boundary(code_boundary)
         elsif @inside_code
